@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Pixel Dungeon Survivors</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+:root {
+  --c-bg:#0a0a0f; --c-blue:#00d4ff; --c-red:#e74c3c;
+  --c-gold:#f1c40f; --c-green:#2ecc71; --c-purple:#7b2fff; --c-border:#333;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--c-bg);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;min-height:100vh;
+  font-family:'Press Start 2P',monospace;overflow:hidden;color:#fff;touch-action:none;}
+
+  /* Hide all game UI by default */
+    #hud, #novaPillar, #waveProgress, #pauseBtn, #muteBtn,
+    #joystick, #aimJoystick, #novaBtn, #miniMap {
+      visibility: hidden;
+    }
+#wrap{
+  position:relative;
+  overflow:hidden;
+  border:2px solid #222;
+  box-shadow:0 0 40px #00d4ff22,0 0 80px #7b2fff11;
+  /* Size is driven by JS resizer to maintain 16:9, clamped 600–1800px wide */
+}
+
+#c{
+  display:block;
+  image-rendering:pixelated;
+  cursor:none;
+  /* canvas pixel size stays 800×600; CSS width/height scale it up */
+  width:100%;
+  height:100%;
+}
+canvas{image-rendering:pixelated;}
+#miniMap{position:absolute;top:85px;left:10px;width:90px;height:65px; opacity: 80%;
+  image-rendering:pixelated;border:1px solid #333;pointer-events:none;z-index:5;}
+
+/* ── HUD ── */
+#hud{position:absolute;top:0;left:0;right:0;padding:10px 12px;
+  display:flex;justify-content:space-between;align-items:flex-start;
+  pointer-events:none;z-index:5;}
+.bars{display:flex;flex-direction:column;gap:5px;}
+.bar-row{display:flex;align-items:center;gap:6px;}
+.bar-label{font-size:6px;color:#888;width:14px;}
+.bar-outer{width:110px;height:9px;background:#111;border:1px solid #333;}
+.bar-inner{height:100%;transition:width 0.1s;}
+
+/* Powerup timer bar */
+#pwupBarRow, #pwupBarRow2{
+  display:none;
+  align-items:center;
+  gap:6px;
+  margin-top:1px;
+}
+#pwupBarIcon, #pwupBarIcon2{
+  font-size:9px;
+  width:18px;
+  height:18px;
+  text-align:center;
+  line-height:18px;
+  border-radius:50%;
+  border:1px solid currentColor;
+  background:rgba(255,255,255,0.08);
+  box-shadow:0 0 6px currentColor, inset 0 0 4px rgba(255,255,255,0.1);
+  flex-shrink:0;
+}
+#pwupBarOuter ,#pwupBarOuter2{
+  width:110px;
+  height:7px;
+  background:#111;
+  border:1px solid #333;
+  border-radius:4px;
+  overflow:hidden;
+  position:relative;
+  box-shadow:inset 0 1px 3px #00000088;
+}
+#pwupBarFill , #pwupBarFill2{
+  height:100%;
+  border-radius:4px;
+  transition:width 0.1s linear, background 0.3s;
+  position:relative;
+}
+/* Gloss line on top of bar */
+#pwupBarFill::after ,#pwupBarFill2::after{
+  content:'';
+  position:absolute;
+  top:1px; left:4px; right:4px;
+  height:2px;
+  background:rgba(255,255,255,0.25);
+  border-radius:2px;
+  pointer-events:none;
+}
+#pwupBarLabel , #pwupBarLabel2{
+  position:absolute;
+  right:5px; top:50%;
+  transform:translateY(-50%);
+  font-size:5px;
+  color:rgba(255,255,255,0.7);
+  pointer-events:none;
+  letter-spacing:1px;
+  text-shadow:0 0 4px #000;
+}
+/* Pulse when low */
+#pwupBarRow.pwup-low #pwupBarFill,
+#pwupBarRow2.pwup-low #pwupBarFill2{
+  animation:pwupLowPulse 0.5s ease-in-out infinite alternate;
+}
+@keyframes pwupLowPulse{
+  from{ opacity:0.6; }
+  to  { opacity:1.0; }
+}
+
+#hpBar{background:linear-gradient(90deg,#922b21,#e74c3c);}
+#xpBar{background:linear-gradient(90deg,#1a5276,#3498db);}
+.stats{text-align:right;display:flex;flex-direction:column;gap:4px;}
+#scoreVal{font-size:10px;color:var(--c-gold);text-shadow:0 0 8px #f1c40f66;}
+#waveVal {font-size:8px;color:#e67e22;}
+#killsVal{font-size:7px;color:#aaa;}
+#levelVal{font-size:7px;color:var(--c-green);}
+#pwupVal {font-size:7px;color:var(--c-gold);background:#f1c40f22;
+  padding:2px 6px;border:1px solid var(--c-gold);display:none;}
+
+/* ── NOVA PILLAR ── */
+#novaPillar{
+  position:absolute;
+  left:1.5%; bottom:5%;
+  width:2.8%; height:22%;
+  min-width:16px; max-width:28px;
+  min-height:100px; max-height:160px;
+  display:flex; flex-direction:column; align-items:center;
+  pointer-events:none; z-index:6;
+}
+#novaPillarTrack{
+  width:70%; height:75%;
+  min-width:10px; min-height:70px;
+  background:#0a0a1a;
+  border:2px solid #1a1a3a;
+  border-radius:3px;
+  position:relative;
+  overflow:hidden;
+  box-shadow:0 0 6px #00000088 inset;
+}
+/* Three stacked nova fill layers */
+.nova-layer{
+  position:absolute;
+  bottom:0; left:0; right:0;
+  height:0%;
+  border-radius:2px;
+  transition:height 0.45s cubic-bezier(0.22,1,0.36,1);
+  overflow:hidden;
+}
+#novaFill1{
+  background:linear-gradient(to top,#003344,#007799,#00d4ff);
+  z-index:1;
+  box-shadow:0 4px 10px #00d4ff88, 0 -3px 12px #00d4ffaa;
+}
+#novaFill2{
+  background:linear-gradient(to top,#003322,#0e8a4a,#2ecc71);
+  z-index:2;
+  box-shadow:0 4px 10px #2ecc7188, 0 -3px 12px #2ecc71aa;
+}
+#novaFill3{
+  background:linear-gradient(to top,#330011,#991133,#e74c3c);
+  z-index:3;
+  box-shadow:0 4px 10px #e74c3c88, 0 -3px 12px #e74c3caa;
+}
+
+/* Shimmer streak that rides up each filled layer */
+.nova-layer::after{
+  content:'';
+  position:absolute;
+  left:0; right:0;
+  height:30%;
+  background:linear-gradient(to bottom,
+    rgba(255,255,255,0.0),
+    rgba(255,255,255,0.18),
+    rgba(255,255,255,0.0));
+  animation:novaShimmer 2.2s ease-in-out infinite;
+  pointer-events:none;
+}
+@keyframes novaShimmer{
+  0%  { top:110%; }
+  100%{ top:-40%; }
+}
+
+/* Top-edge bloom — glowing lip where layers meet */
+.nova-layer::before{
+  content:'';
+  position:absolute;
+  top:0; left:0; right:0;
+  height:4px;
+  background:rgba(255,255,255,0.55);
+  border-radius:2px 2px 0 0;
+  filter:blur(1.5px);
+  pointer-events:none;
+}
+/* Rising energy particles inside pillar */
+.nova-particle{
+  position:absolute;
+  border-radius:50%;
+  pointer-events:none;
+  z-index:10;
+  animation:novaRise linear forwards;
+}
+@keyframes novaRise{
+  0%  { opacity:0; transform:translateX(-50%) translateY(0)    scale(0.6); }
+  15% { opacity:0.9; }
+  70% { opacity:0.6; transform:translateX(-50%) translateY(-70px) scale(1.1); }
+  100%{ opacity:0;   transform:translateX(-50%) translateY(-98px) scale(0.3); }
+}
+/* Scanline marks on pillar */
+#novaPillarTrack::before{
+  content:'';
+  position:absolute;
+  top:0;left:0;right:0;bottom:0;
+  background:repeating-linear-gradient(
+    to bottom,
+    transparent 0px, transparent 9px,
+    #ffffff08 9px, #ffffff08 10px
+  );
+  pointer-events:none;
+  z-index:2;
+}
+/* Cap glow at top */
+#novaCap{
+  width:70%; height:4%;
+  min-height:4px; max-height:7px;
+  background:#1a1a3a;
+  border:2px solid #1a1a3a;
+  border-bottom:none;
+  border-radius:3px 3px 0 0;
+  margin-bottom:0;
+}
+/* Stored charge dots */
+#novaStoredDots{
+  display:flex; gap:3px; margin-top:4px;
+}
+.nova-dot{
+  width:6px; height:6px; border-radius:50%;
+  background:#1a1a3a; border:1px solid #334466;
+  transition:all 0.2s;
+}
+.nova-dot.filled{
+  background:#00d4ff;
+  border-color:#00d4ff;
+  box-shadow:0 0 4px #00d4ffaa;
+}
+#novaCounter{font-size:5px;color:#00d4ff88;margin-top:2px;text-align:center;}
+#novaLabel  {font-size:4px;color:#334466;margin-top:1px;text-align:center;letter-spacing:1px;}
+
+/* READY state — pulse glow */
+#novaPillar.nova-ready #novaPillarTrack{
+  border-color:#00d4ff;
+  box-shadow:0 0 8px #00d4ff88, 0 0 16px #00d4ff44;
+  animation:novaPulse 0.8s ease-in-out infinite;
+}
+#novaPillar.nova-ready #novaCap{
+  border-color:#00d4ff;
+  background:#00d4ff44;
+}
+#novaPillar.nova-ready #novaCounter{color:#00d4ff;font-size:5px;}
+#novaPillar.nova-ready #novaLabel  {color:#00d4ff;}
+
+/* Per-dot color overrides */
+#novaDot0.filled{ background:#00d4ff; border-color:#00d4ff; box-shadow:0 0 5px #00d4ffcc; }
+#novaDot1.filled{ background:#2ecc71; border-color:#2ecc71; box-shadow:0 0 5px #2ecc71cc; }
+#novaDot2.filled{ background:#e74c3c; border-color:#e74c3c; box-shadow:0 0 5px #e74c3ccc; }
+
+@keyframes novaPulse{
+  0%,100%{box-shadow:0 0 8px #00d4ff88,0 0 16px #00d4ff44;}
+  50%    {box-shadow:0 0 14px #00d4ffcc,0 0 28px #00d4ff66;}
+}
+
+/* ── WAVE PROGRESS ── */
+#waveProgress{position:absolute;bottom:0;left:0;right:0;height:4px;
+  background:#111;pointer-events:none;z-index:5;}
+#waveBar{height:100%;background:var(--c-gold);width:0%;transition:width 0.5s;}
+
+/* ── PAUSE BTN ── */
+#pauseBtn{position:absolute;top:10px;left:50%;transform:translateX(-50%);
+  font-family:'Press Start 2P',monospace;font-size:7px;
+  background:#111;border:1px solid #444;color:#666;
+  padding:4px 10px;cursor:pointer;z-index:6;pointer-events:all;}
+
+/* ── SCREENS ── */
+.screen{position:absolute;inset:0;background:#0a0a0f57;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:10px;z-index:20;padding:20px;}
+.screen.hidden{display:none;}
+.screen h1{font-size:18px;color:var(--c-gold);
+  text-shadow:0 0 20px #f1c40f88;-webkit-text-fill-color:var(--c-gold);margin-bottom:6px;}
+.screen h2{font-size:9px;color:#555;margin-bottom:4px;}
+.btn{font-family:'Press Start 2P',monospace;font-size:9px;
+  background:linear-gradient(135deg,#1a1a2e,#16213e);
+  border:2px solid var(--c-gold);color:var(--c-gold);
+  padding:10px 20px;cursor:pointer;line-height:1;
+  box-shadow:0 0 12px #f1c40f44;transition:all 0.2s;}
+.btn:hover{background:linear-gradient(135deg,var(--c-gold),#e67e22);color:#000;
+  box-shadow:0 0 20px #f1c40f88;}
+
+/* controls grid */
+.controls-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;
+  margin:10px 0;max-width:360px;}
+.ctrl{font-size:6px;color:#666;background:#111;border:1px solid #222;
+  padding:6px;text-align:center;}
+.ctrl span{display:block;color:var(--c-blue);margin-bottom:3px;}
+
+/* pause stats */
+.pause-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0;}
+.ps{font-size:8px;color:#888;background:#111;padding:6px 10px;border:1px solid #222;}
+.ps span{color:var(--c-gold);}
+
+/* pause action buttons row */
+.pause-actions{ display:flex; gap:8px; margin-top:8px; }
+.pause-actions .btn{ flex:1; font-size:7px; padding:8px 4px; }
+#pauseRestartBtn{ border-color:#e67e22; color:#e67e22; }
+#pauseRestartBtn:hover{ background:#e67e22; color:#000; }
+#pauseQuitBtn{ border-color:#e74c3c; color:#e74c3c; }
+#pauseQuitBtn:hover{ background:#e74c3c; color:#000; }
+
+/* confirmation overlay */
+#confirmModal{
+  position:absolute; inset:0; z-index:500;
+  background:rgba(0,0,0,0.85);
+  display:flex; align-items:center; justify-content:center;
+}
+#confirmModal.hidden{ display:none; }
+#confirmBox{
+  background:#0a0a14; border:2px solid #333;
+  padding:20px 24px; text-align:center;
+  display:flex; flex-direction:column; gap:10px;
+  min-width:200px; max-width:260px;
+}
+#confirmTitle{ font-size:9px; color:#f1c40f; }
+#confirmMsg{ font-size:6px; color:#888; line-height:2; }
+.confirm-btns{ display:flex; gap:8px; justify-content:center; margin-top:4px; }
+#confirmYes{ font-size:7px; padding:7px 18px; border-color:#e74c3c; color:#e74c3c; }
+#confirmYes:hover{ background:#e74c3c; color:#000; }
+#confirmNo{ font-size:7px; padding:7px 18px; border-color:#555; color:#888; }
+#confirmNo:hover{ background:#333; color:#fff; }
+
+/* upgrade cards */
+#upgradeCards{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px;}
+.upgrade-card{background:#111;border:2px solid #333;padding:14px 10px;
+  width:120px;cursor:pointer;text-align:center;transition:all 0.15s;}
+.upgrade-card:hover{border-color:var(--c-gold);background:#1a1a1a;
+  box-shadow:0 0 12px #f1c40f44;transform:translateY(-3px);}
+.u-icon{font-size:22px;display:block;margin-bottom:8px;}
+.u-name{font-size:7px;color:var(--c-gold);margin-bottom:6px;}
+.u-desc{font-size:6px;color:#666;line-height:1.8;}
+
+/* game over */
+.go-stat{font-size:10px;color:#888;padding:4px;}
+
+/* skill tutorial */
+.skill-desc{font-size:7px;color:#888;margin:6px 0;line-height:2.2;text-align:center;}
+.skill-key{display:inline-block;background:#111;border:2px solid var(--c-blue);
+  padding:4px 10px;font-size:9px;color:var(--c-blue);margin:8px 0;}
+.skill-range{font-size:6px;color:#555;margin-top:4px;}
+
+/* ── CODEX ── */
+#codexWrap{ display:flex; width:100%; height:100%; }
+#codexSidebar{
+  width:90px; background:#07070f; border-right:2px solid #1a1a2e;
+  display:flex; flex-direction:column; align-items:center;
+  padding:10px 0; gap:4px; flex-shrink:0;
+}
+.codex-tab{
+  width:80px; padding:8px 4px; text-align:center; cursor:pointer;
+  font-size:5px; color:#444; border:1px solid #111; background:#0d0d1a;
+  transition:all 0.15s; border-radius:2px; line-height:1.8;
+}
+.codex-tab span{ display:block; font-size:4.5px; margin-top:2px; }
+.codex-tab:hover{ color:#aaa; border-color:#333; background:#111; }
+.codex-tab.active{
+  color:var(--c-blue); border-color:var(--c-blue);
+  background:#00d4ff11; text-shadow:0 0 8px #00d4ff66;
+}
+.codex-back{
+  margin-top:auto; font-size:5px; padding:6px 8px;
+  border-color:#333; color:#444; box-shadow:none;
+}
+.codex-back:hover{ color:#fff; border-color:#fff; background:#111; }
+#codexPanel{
+  flex:1; display:flex; overflow:hidden; position:relative;
+}
+#codexContent{
+  flex:1; overflow-y:auto; padding:14px;
+  scrollbar-width:thin; scrollbar-color:#222 #0a0a0f;
+}
+#codexDetail{
+  width:260px; background:#07070f; border-left:2px solid #1a1a2e;
+  padding:14px; overflow-y:auto; flex-shrink:0;
+}
+#codexDetail.hidden{ display:none; }
+.codex-title{
+  font-size:9px; color:var(--c-gold); margin-bottom:10px;
+  text-shadow:0 0 10px #f1c40f55; border-bottom:1px solid #1a1a2e; padding-bottom:6px;
+}
+
+/* Control cards */
+.cx-ctrl-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.cx-ctrl{
+  background:#0d0d1a; border:1px solid #1a1a2e; padding:10px;
+  border-radius:2px;
+}
+.cx-ctrl-key{
+  display:inline-block; background:#111; border:2px solid #333;
+  padding:3px 8px; font-size:7px; color:var(--c-blue);
+  margin-bottom:6px; border-radius:2px;
+}
+.cx-ctrl-desc{ font-size:5px; color:#666; line-height:1.8; }
+
+/* Enemy cards grid */
+.cx-enemy-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.cx-enemy-card{
+  background:#0d0d1a; border:2px solid #1a1a2e; padding:10px 6px;
+  text-align:center; cursor:pointer; transition:all 0.15s; border-radius:2px;
+  position:relative;
+}
+.cx-enemy-card:hover{ transform:translateY(-2px); }
+.cx-enemy-card.tier-normal:hover{ border-color:#e74c3c; box-shadow:0 0 8px #e74c3c44; }
+.cx-enemy-card.tier-elite:hover{ border-color:#f1c40f; box-shadow:0 0 8px #f1c40f44; }
+.cx-enemy-card.tier-champion:hover{ border-color:#9b59b6; box-shadow:0 0 8px #9b59b644; }
+.cx-enemy-card.tier-boss:hover{ border-color:#ff0055; box-shadow:0 0 8px #ff005544; }
+.cx-enemy-card.selected{ border-color:var(--c-blue)!important; }
+.cx-enemy-icon{ font-size:20px; margin-bottom:5px; }
+.cx-enemy-name{ font-size:4.5px; color:#ccc; margin-bottom:3px; }
+.cx-tier-badge{
+  font-size:4px; padding:2px 4px; border-radius:1px; margin-top:3px;
+  display:inline-block;
+}
+.badge-normal  { background:#e74c3c22; color:#e74c3c; border:1px solid #e74c3c55; }
+.badge-elite   { background:#f1c40f22; color:#f1c40f; border:1px solid #f1c40f55; }
+.badge-champion{ background:#9b59b622; color:#9b59b6; border:1px solid #9b59b655; }
+.badge-boss    { background:#ff005522; color:#ff0055; border:1px solid #ff005555; }
+
+/* Detail panel */
+.cx-detail-name{ font-size:8px; color:#fff; margin-bottom:6px; }
+.cx-detail-tier{ font-size:5px; margin-bottom:10px; }
+.cx-stat-row{
+  display:flex; justify-content:space-between; align-items:center;
+  font-size:5px; padding:4px 0; border-bottom:1px solid #111; color:#666;
+}
+.cx-stat-val{ color:#ccc; }
+.cx-ability-list{ margin-top:8px; }
+.cx-ability{ font-size:5px; color:#9b59b6; padding:3px 0; line-height:1.8; }
+.cx-tip{ font-size:5px; color:#2ecc71; margin-top:10px; line-height:1.8;
+  background:#2ecc7111; border-left:2px solid #2ecc71; padding:6px; }
+
+/* Wave modifier cards */
+.cx-mod-grid{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.cx-mod-card{
+  background:#0d0d1a; border:2px solid #1a1a2e; padding:12px;
+  cursor:pointer; transition:all 0.15s; border-radius:2px;
+}
+.cx-mod-card:hover{ background:#111; transform:translateY(-1px); }
+.cx-mod-card.selected{ border-color:var(--c-blue); }
+.cx-mod-header{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.cx-mod-icon{ font-size:18px; }
+.cx-mod-name{ font-size:6px; color:#fff; }
+.cx-mod-desc{ font-size:5px; color:#666; line-height:1.8; }
+.cx-danger{ font-size:4px; margin-top:5px; }
+.danger-low{ color:#2ecc71; } .danger-med{ color:#f1c40f; } .danger-high{ color:#e74c3c; }
+
+/* Generic info card */
+.cx-info-card{
+  background:#0d0d1a; border:1px solid #1a1a2e; padding:12px;
+  margin-bottom:8px; border-radius:2px;
+}
+.cx-info-header{ display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.cx-info-icon{ font-size:16px; }
+.cx-info-name{ font-size:7px; color:var(--c-gold); }
+.cx-info-body{ font-size:5px; color:#666; line-height:2; }
+.cx-info-body b{ color:#aaa; }
+.cx-highlight{ color:var(--c-blue); }
+
+/* ── GUIDE (dead rules removed — GUIDE.js renders its own HTML) ── */
+
+/* Card grid */
+#guideGrid{ display:grid; grid-template-columns:repeat(4,1fr);
+  gap:6px; overflow-y:auto; align-content:start;
+  flex:0 0 310px; padding-right:4px; }
+#guideGrid::-webkit-scrollbar{ width:4px; }
+#guideGrid::-webkit-scrollbar-thumb{ background:#333; }
+
+.gcard{ background:#0d0d1a; border:1px solid #222; padding:8px 6px;
+  text-align:center; cursor:pointer; transition:all 0.15s;
+  display:flex; flex-direction:column; align-items:center; gap:3px; }
+.gcard:hover{ border-color:#555; background:#111; transform:translateY(-1px); }
+.gcard-active{ border-color:#f1c40f !important; background:#1a1a0a !important; }
+.gcard-normal  { border-color:#e74c3c33; }
+.gcard-elite   { border-color:#f1c40f33; }
+.gcard-champion{ border-color:#9b59b633; }
+.gcard-icon{ font-size:18px; }
+.gcard-name{ font-size:4.5px; color:#ccc; line-height:1.4; }
+.gcard-tier{ font-size:4px; padding:1px 4px; border-radius:2px; }
+.gcard-tier-normal  { color:#e74c3c; background:#e74c3c22; }
+.gcard-tier-elite   { color:#f1c40f; background:#f1c40f22; }
+.gcard-tier-champion{ color:#9b59b6; background:#9b59b622; }
+.gcard-threat{ font-size:5px; color:#f1c40f; letter-spacing:0; }
+.gcard-keys{ font-size:4px; color:#888; }
+.gcard-dot{ width:8px; height:8px; border-radius:50%; }
+
+/* Detail panel */
+#guideDetail{ flex:1; overflow-y:auto; background:#080810;
+  border:1px solid #1a1a1a; padding:12px; }
+#guideDetail::-webkit-scrollbar{ width:4px; }
+#guideDetail::-webkit-scrollbar-thumb{ background:#333; }
+.gdetail-empty{ font-size:7px; color:#666; text-align:center;
+  padding-top:60px; line-height:3; }
+.gdetail-header{ display:flex; gap:10px; align-items:flex-start;
+  border-bottom:1px solid #1a1a1a; padding-bottom:8px; margin-bottom:8px; }
+.gdetail-icon{ font-size:28px; flex-shrink:0; }
+.gdetail-name{ font-size:9px; color:#f1c40f; margin-bottom:3px; }
+.gdetail-tier{ font-size:6px; }
+.gdetail-keys{ font-size:6px; color:#00d4ff; margin-top:2px; }
+.gdetail-when{ font-size:5.5px; color:#888; margin-top:2px; }
+.gdetail-stats{ display:flex; flex-direction:column; gap:4px; margin-bottom:8px; }
+.gstat{ font-size:5.5px; color:#888; display:flex; gap:6px; }
+.gstat span{ color:#555; min-width:55px; }
+.gdetail-effect{ border:1px solid #1a1a1a; padding:6px 8px;
+  margin-bottom:8px; font-size:6px; color:#ccc; }
+.gdetail-elabel{ font-size:5px; color:#888; margin-bottom:3px; }
+.gdetail-desc{ font-size:6px; color:#aaa; line-height:2.2; margin-bottom:8px; }
+.gdetail-data{ font-size:5.5px; color:#999; line-height:2.2; margin-bottom:8px;
+  background:#0d0d1a; padding:6px 8px; border-left:2px solid #333; }
+.gdetail-section{ margin-bottom:8px; font-size:6px; color:#aaa; line-height:2; }
+.gdetail-slabel{ display:block; font-size:5px; margin-bottom:3px; }
+.gdetail-tip{ background:#1a1a0a; border:1px solid #f1c40f33;
+  padding:8px; font-size:6px; color:#aaa; line-height:2.2; }
+.gtip-label{ display:block; color:#f1c40f; font-size:5px; margin-bottom:4px; }
+#guideBack{ margin-top:8px; flex-shrink:0; align-self:center; }
+
+/* ── GUIDE ── */
+#guideScreen{ overflow-y:auto; justify-content:flex-start;
+  padding:0; align-items:stretch; }
+#guideInner{ display:flex; flex-direction:column; align-items:center;
+  width:100%; max-width:780px; margin:0 auto; padding:12px 10px; }
+#guideTabs{ display:flex; flex-wrap:wrap; gap:4px; justify-content:center;
+  margin-bottom:10px; width:100%; }
+.gtab{ font-family:'Press Start 2P',monospace; font-size:6px;
+  background:#0d0d1a; border:1px solid #222; color:#555;
+  padding:5px 8px; cursor:pointer; transition:all 0.12s; }
+.gtab:hover{ color:#aaa; border-color:#444; }
+.gtab-active{ color:#f1c40f; border-color:#f1c40f55; background:#1a1a00; }
+#guideContent{ width:100%; }
+.gt{ font-size:8px; color:#f1c40f; margin:10px 0 6px; letter-spacing:1px; }
+.guide-table{ width:100%; border-collapse:collapse; font-size:6px; margin-bottom:8px; }
+.guide-table th{ color:#f1c40f; padding:4px 8px; border-bottom:1px solid #222;
+  text-align:left; font-size:5px; }
+.guide-table td{ padding:4px 8px; border-bottom:1px solid #111; color:#aaa;
+  vertical-align:top; line-height:1.8; }
+.key{ color:#00d4ff !important; font-size:6px !important; white-space:nowrap; }
+.guide-tip{ font-size:6px; color:#999; background:#ffffff08;
+  border-left:2px solid #f1c40f44; padding:6px 8px; margin:8px 0;
+  line-height:1.8; }
+.guide-para{ font-size:6px; color:#aaa; line-height:2.0; margin:4px 0 8px; }
+/* Enemy grid — all 12 fit in one view, 4 per tier row */
+.tier-label{ font-size:5px; padding:3px 8px; margin:6px 0 4px;
+  letter-spacing:1px; }
+.enemy-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:4px;
+  margin-bottom:4px; }
+.enemy-card{ background:#0a0a14; border:1px solid #1a1a2e;
+  padding:4px 3px; text-align:center; cursor:pointer; transition:border-color 0.1s; }
+.enemy-card:hover{ border-color:#333; }
+.enemy-card-sel{ background:#0f0f1e !important; }
+.enemy-canvas{ display:block; margin:0 auto 2px; image-rendering:pixelated;
+  width:32px; height:36px; }
+.en-name{ font-size:4.5px; margin-bottom:1px; }
+.en-desc{ font-size:4px; color:#777; line-height:1.5; margin-bottom:2px; }
+.en-threat{ font-size:6px; color:#e74c3c; letter-spacing:0px; }
+.enemy-detail{ background:#0a0a14; border:1px solid #333;
+  border-left:3px solid #555; padding:10px; font-family:'Press Start 2P',monospace;
+  position:sticky; top:0; }
+.enemy-detail-empty{ font-size:5.5px; color:#555; padding:20px 8px;
+  text-align:center; border:1px dashed #1a1a2e; line-height:2; }
+/* Wave mods */
+.mod-grid{ display:flex; flex-direction:column; gap:5px; }
+.mod-card{ display:flex; align-items:flex-start; gap:8px;
+  background:#0a0a14; border:1px solid #1a1a2e; padding:6px 8px; }
+.mod-icon{ font-size:16px; flex-shrink:0; }
+.mod-name{ font-size:6px; }
+.mod-desc{ font-size:5.5px; color:#666; }
+.tag-normal{ color:#aaa; } .tag-elite{ color:#f1c40f; } .tag-champ{ color:#9b59b6; }
+/* Mechanics */
+.mech-block{ background:#0a0a14; border:1px solid #1a1a2e;
+  border-left:3px solid #f1c40f44; padding:8px 10px; margin-bottom:8px; }
+.mech-block p{ font-size:6px; color:#888; margin:3px 0; line-height:1.8; }
+.mech-title{ font-size:7px; color:#f1c40f; margin-bottom:5px; }
+.mech-key{ font-size:6px; color:#00d4ff; margin-left:6px; }
+/* Shop guide */
+.shop-guide-grid{ display:grid; grid-template-columns:repeat(2,1fr);
+  gap:5px; margin-bottom:8px; }
+.sg-card{ background:#0a0a14; border:1px solid #1a1a2e;
+  padding:6px 8px; display:flex; gap:6px; align-items:flex-start; }
+.sg-icon{ font-size:16px; flex-shrink:0; }
+.sg-name{ font-size:6px; color:#f1c40f; }
+.sg-desc{ font-size:5px; color:#666; line-height:1.6; }
+.sg-cost{ font-size:5px; color:#777; margin-top:2px; }
+/* Credits */
+.credit-card{ background:#0a0a14; border:1px solid #1a1a2e;
+  border-left:3px solid #9b59b6; padding:8px 10px; margin-bottom:8px; }
+.credit-track{ font-size:7px; color:#fff; margin-bottom:3px; }
+.credit-when{ font-size:5px; color:#555; }
+.credit-artist{ font-size:6px; color:#aaa; margin-bottom:3px; }
+.credit-link{ font-size:5.5px; color:#3498db; text-decoration:none; }
+.credit-link:hover{ text-decoration:underline; }
+
+/* ── PROFILE SCREEN ── */
+#profileScreen{ overflow-y:auto; justify-content:flex-start; align-items:stretch; padding:0; }
+#profileInner{ display:flex; flex-direction:column; align-items:center;
+  width:100%; max-width:560px; margin:0 auto; padding:16px 14px 24px; }
+#profHero{ width:100%; text-align:center; padding:18px 0 14px;
+  border-bottom:1px solid #111; margin-bottom:14px; }
+.prof-section-title{ font-size:5.5px; color:#555; letter-spacing:3px;
+  width:100%; margin:12px 0 7px; border-bottom:1px solid #111;
+  padding-bottom:5px; }
+
+/* Stats */
+.prof-stats-grid{ display:grid; grid-template-columns:repeat(3,1fr);
+  gap:5px; width:100%; margin-bottom:4px; }
+.prof-stat{ background:#0a0a14; border:1px solid #111;
+  padding:10px 6px; text-align:center; }
+.prof-stat-val{ font-size:13px; color:#fff; margin-bottom:3px; }
+.prof-stat-lbl{ font-size:4px; color:#666; letter-spacing:1px; }
+
+/* Upgrades */
+.prof-upg-grid{ display:grid; grid-template-columns:repeat(2,1fr);
+  gap:5px; width:100%; }
+.prof-upg{ background:#0a0a14; border:1px solid #111;
+  padding:8px 10px; display:flex; align-items:center;
+  justify-content:space-between; gap:8px; transition:border-color 0.15s; }
+.prof-upg-left{ flex:1; min-width:0; }
+.prof-upg-name{ font-size:4.5px; color:#555; margin-bottom:4px; letter-spacing:1px; }
+.prof-upg-bar{ font-size:8px; letter-spacing:1px; }
+.prof-upg-right{ text-align:right; flex-shrink:0; }
+.prof-upg-val{ font-size:7px; margin-bottom:2px; }
+.prof-upg-sub{ font-size:4px; color:#666; }
+
+/* Leaderboard */
+.prof-lb-row{ display:flex; gap:8px; align-items:center;
+  padding:6px 8px; background:#0a0a14; border:1px solid #111;
+  margin-bottom:3px; }
+.prof-lb-rank{ font-size:7px; width:18px; flex-shrink:0; text-align:center; }
+.prof-lb-score{ font-size:8px; flex:1; }
+.prof-lb-detail{ font-size:5px; color:#777; }
+.prof-lb-date{ font-size:4.5px; color:#555; margin-left:auto; }
+.prof-empty{ font-size:6px; color:#555; padding:12px 0; text-align:center;
+  width:100%; font-style:italic; }
+
+/* Worlds */
+#profWorlds{ width:100%; display:flex; flex-direction:column; gap:5px; }
+.prof-world{ display:flex; align-items:center; gap:12px;
+  padding:10px 12px; background:#0a0a14; border:1px solid #111; }
+.prof-world.world-open{ border-color:#ffffff11; }
+.prof-world.world-locked{ opacity:0.6; }
+.prof-world-num{ font-size:18px; font-weight:bold; flex-shrink:0;
+  width:28px; text-align:center; }
+.prof-world-info{ flex:1; min-width:0; }
+.prof-world-name{ font-size:7px; margin-bottom:3px; letter-spacing:1px; }
+.prof-world-sub{ font-size:5px; letter-spacing:1px; }
+.prof-world-status{ flex-shrink:0; text-align:right; }
+
+/* ── PROFILE CARD (mini on start screen) ── */
+
+/* ── NAME POPUP ── */
+#namePopup{ position:fixed;inset:0;background:#000000cc;
+  display:flex;align-items:center;justify-content:center;
+  z-index:999;font-family:'Press Start 2P',monospace; }
+#namePopup.hidden{ display:none; }
+#namePopupInner{ background:#0a0a14;border:2px solid #f1c40f;
+  padding:24px 28px;text-align:center;max-width:340px; }
+#namePopupInner h2{ font-size:10px;color:#f1c40f;margin-bottom:6px; }
+#namePopupInner p{ font-size:6px;color:#555;margin-bottom:14px;line-height:1.8; }
+#namePopupInput{ background:#000;border:1px solid #f1c40f;color:#f1c40f;
+  font-family:'Press Start 2P',monospace;font-size:9px;
+  padding:8px 10px;width:100%;box-sizing:border-box;
+  text-transform:uppercase;margin-bottom:10px;text-align:center; }
+
+/* ── SHOP ── */
+.name-input:focus{ border-color:#f1c40f; }
+.name-modal-btns{ display:flex; gap:8px; justify-content:center; }
+.name-modal-skip{ font-size:5px; color:#666; margin-top:12px;
+  cursor:pointer; transition:color 0.15s; }
+.name-modal-skip:hover{ color:#666; }
+
+/* ── LEVEL UP BANNER ── */
+.levelup-banner{ position:fixed; top:60px; left:50%; transform:translateX(-50%) translateY(-20px);
+  background:#0d0d1a; border:2px solid #f1c40f; padding:10px 24px;
+  font-family:'Press Start 2P',monospace; text-align:center;
+  opacity:0; transition:all 0.4s; z-index:8000; pointer-events:none; }
+.levelup-banner-show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* ── SHOP ── */
+#shopScreen{ overflow-y:auto; justify-content:flex-start; padding:16px 12px; }
+#shopScreen h1{ font-size:14px; margin-bottom:4px; }
+#shopGold{ font-size:10px; color:#f1c40f; margin-bottom:10px;
+  text-shadow:0 0 8px #f1c40f66; }
+#shopGrid{ display:grid; grid-template-columns:repeat(5,1fr); gap:8px;
+  width:100%; max-width:780px; }
+.shop-card{ background:#0d0d1a; border:2px solid #222; padding:8px 6px;
+  text-align:center; cursor:pointer; transition:all 0.15s; border-radius:2px; }
+.shop-buyable{ border-color:#f1c40f55; }
+.shop-buyable:hover{ border-color:#f1c40f; background:#1a1a0a;
+  transform:translateY(-2px); box-shadow:0 0 10px #f1c40f44; }
+.shop-poor{ opacity:0.45; cursor:default; }
+.shop-maxed{ border-color:#2ecc7155; background:#0a1a0a; cursor:default; }
+.shop-icon{ font-size:20px; margin-bottom:4px; }
+.shop-name{ font-size:5px; color:#f1c40f; margin-bottom:3px; }
+.shop-desc{ font-size:4.5px; color:#666; margin-bottom:5px; line-height:1.6; }
+.shop-pips{ font-size:8px; color:#666; margin-bottom:4px; letter-spacing:1px; }
+.pip-on{ color:#f1c40f !important; }
+.shop-cost{ font-size:6px; color:#aaa; }
+.shop-maxed .shop-cost{ color:#2ecc71; }
+#shopBack{ margin-top:12px; }
+
+/* ── LEADERBOARD ── */
+.lb-row{display:grid;grid-template-columns:28px 1fr 80px 60px;gap:4px;
+  align-items:center;padding:4px 6px;font-size:6px;border-bottom:1px solid #1a1a1a;}
+.lb-gold  {color:#f1c40f;background:#f1c40f11;}
+.lb-silver{color:#bdc3c7;background:#bdc3c711;}
+.lb-bronze{color:#e67e22;background:#e67e2211;}
+.lb-row:not(.lb-gold):not(.lb-silver):not(.lb-bronze){color:#666;}
+.lb-rank {color:inherit;font-weight:bold;}
+.lb-score{color:inherit;text-align:right;}
+.lb-detail{color:#555;font-size:5px;}
+.lb-date {color:#666;font-size:5px;text-align:right;}
+.lb-empty{font-size:6px;color:#666;text-align:center;padding:8px;}
+#goLeaderboard{width:100%;max-width:340px;margin-top:8px;border:1px solid #1a1a1a;}
+#goBest{font-size:10px;color:#f1c40f;text-shadow:0 0 12px #f1c40f88;min-height:16px;}
+
+#aimIndicator{
+  font-size:6px; padding:2px 6px;
+  border:1px solid #2ecc71; color:#2ecc71;
+  background:#2ecc7122; display:none;
+  animation: aimPulse 0.6s ease-in-out infinite alternate;
+}
+@keyframes aimPulse{ from{opacity:0.6} to{opacity:1} }
+
+/* ── MUTE BTN ── */
+#muteBtn{position:absolute;top:6px;right:130px;
+  font-family:'Press Start 2P',monospace;font-size:8px;
+  background:#111;border:1px solid #333;color:#555;
+  padding:4px 8px;cursor:pointer;z-index:6;pointer-events:all;}
+#muteBtn:hover{color:#fff;border-color:#fff;}
+#joystick{position:absolute;bottom:50px;left:50px;width:80px;height:80px;
+  display:none;z-index:10;pointer-events:all;}
+@media(hover:none){#joystick{display:block;}}
+#jBase{width:90px;height:90px;background:#ffffff11;
+  border:2px solid #ffffff22;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;}
+#jThumb{width:56px;height:56px;background:#ffffff33;
+  border:2px solid #ffffff55;border-radius:50%;transition:transform 0.05s;}
+  /* ============================================================================================================= */
+  #aimJoystick {
+    position: absolute; bottom: 50px; right: 40px;
+    width: 80px; height: 80px;
+    display: none; z-index: 10; pointer-events: all;
+    opacity: 80%;
+  }
+  @media (hover: none) { #aimJoystick { display: block; } }
+
+  #aimBase {
+    width: 90px; height: 90px;
+    background: #3498db11; border: 2px solid #3498db33; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #aimThumb {
+    width: 56px; height: 56px;
+    background: #3498db33; border: 2px solid #3498db66; border-radius: 50%;
+    transition: transform 0.05s;
+  }
+
+  #novaBtn {
+    position: absolute; bottom: 55px; right: 135px;opacity: 60%;
+    width: 60px; height: 60px;
+    background: #00d4ff22; border: 2px solid #00d4ff55; border-radius: 50%;
+    display: none; z-index: 10; pointer-events: all;
+    font-size: 24px; line-height: 60px; text-align: center;
+    cursor: pointer; transition: background 0.1s, transform 0.1s;
+  }
+  @media (hover: none) { #novaBtn { display: block; } }
+  #novaBtn.nova-ready { background: #00d4ff44; border-color: #00d4ffaa; box-shadow: 0 0 12px #00d4ff66; }
+  #novaBtn:active { transform: scale(0.92); }
+
+/* skill tutorial overrides */
+#skillTutScreen h1{font-size:14px;color:var(--c-blue);-webkit-text-fill-color:var(--c-blue);}
+/* ═══════════════════════════════════════════════════════════
+   LOADING SCREEN
+   ═══════════════════════════════════════════════════════════ */
+#loadScreen{
+  position:fixed;inset:0;z-index:99999;
+  background:#000;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  overflow:hidden;
+  transition:opacity 0.8s ease-out;
+}
+#loadScreen.fade-out{ opacity:0; pointer-events:none; }
+#loadScreen::before{
+  content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(
+    to bottom,transparent 0px,transparent 3px,
+    rgba(0,0,0,0.15) 3px,rgba(0,0,0,0.15) 4px
+  );pointer-events:none;z-index:2;
+}
+#loadScreen::after{
+  content:'';position:absolute;inset:0;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,0.88) 100%);
+  pointer-events:none;z-index:2;
+}
+#ldStudio{
+  position:absolute;top:28px;left:50%;transform:translateX(-50%);
+  font-size:6px;letter-spacing:7px;color:#111;
+  text-transform:uppercase;z-index:3;white-space:nowrap;
+  animation:ldFadeIn 0.7s ease-out 0.2s both;
+}
+#ldLogoWrap{
+  position:relative;z-index:3;
+  display:flex;flex-direction:column;align-items:center;
+  margin-bottom:44px;
+}
+#ldSkull{
+  font-size:72px;line-height:1;
+  filter:drop-shadow(0 0 28px #00d4ff99) drop-shadow(0 0 70px #7b2fff55);
+  animation:ldSkullPop 0.55s cubic-bezier(0.34,1.56,0.64,1) 0.5s both;
+}
+#ldTitle{
+  font-size:clamp(13px,2.8vw,20px);color:#fff;letter-spacing:5px;margin-top:18px;
+  text-shadow:0 0 32px #00d4ffbb,0 0 70px #7b2fff77;
+  animation:ldFadeSlideUp 0.6s ease-out 0.95s both;
+}
+#ldSubtitle{
+  font-size:7px;color:#7b2fff;letter-spacing:9px;margin-top:8px;
+  animation:ldFadeSlideUp 0.5s ease-out 1.15s both;
+}
+#ldEdition{
+  font-size:5px;color:#222;letter-spacing:3px;margin-top:8px;
+  animation:ldFadeIn 0.5s ease-out 1.3s both;
+}
+#ldBarWrap{
+  position:relative;z-index:3;width:min(340px,68vw);
+  animation:ldFadeIn 0.5s ease-out 1.4s both;
+}
+#ldBarTrack{
+  width:100%;height:5px;background:#050510;border:1px solid #111;
+  overflow:hidden;position:relative;
+}
+#ldBarFill{
+  height:100%;width:0%;
+  background:linear-gradient(90deg,#7b2fff,#00d4ff,#fff);
+  background-size:200% 100%;
+  transition:width 0.1s linear;
+  animation:ldShimmer 2s linear infinite;
+  position:relative;
+}
+#ldBarFill::after{
+  content:'';position:absolute;top:0;right:0;bottom:0;width:16px;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,0.7));
+}
+@keyframes ldShimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+#ldStatus{display:flex;justify-content:space-between;margin-top:8px;}
+#ldStatusText{font-size:5px;color:#666;letter-spacing:1px;}
+#ldPercent{font-size:5px;color:#00d4ff66;letter-spacing:1px;}
+#ldEnter{
+  position:relative;z-index:3;margin-top:30px;
+  font-family:'Press Start 2P',monospace;font-size:9px;
+  background:transparent;border:2px solid #f1c40f;color:#f1c40f;
+  padding:12px 28px;cursor:pointer;letter-spacing:2px;
+  box-shadow:0 0 18px #f1c40f33;transition:all 0.18s;display:none;
+}
+#ldEnter:hover{
+  background:#f1c40f;color:#000;
+  box-shadow:0 0 40px #f1c40faa,0 0 80px #f1c40f44;transform:scale(1.05);
+}
+#ldEnter.visible{
+  display:block;
+  animation:ldFadeSlideUp 0.45s ease-out both,ldEnterPulse 1.5s ease-in-out 0.5s infinite;
+}
+@keyframes ldEnterPulse{
+  0%,100%{box-shadow:0 0 18px #f1c40f33;}
+  50%{box-shadow:0 0 36px #f1c40f88,0 0 70px #f1c40f33;}
+}
+.ld-corner{position:absolute;width:22px;height:22px;z-index:3;opacity:0;animation:ldFadeIn 0.5s ease-out 0.7s both;}
+.ld-corner-tl{top:18px;left:18px;border-top:2px solid #0f0f1e;border-left:2px solid #0f0f1e;}
+.ld-corner-tr{top:18px;right:18px;border-top:2px solid #0f0f1e;border-right:2px solid #0f0f1e;}
+.ld-corner-bl{bottom:18px;left:18px;border-bottom:2px solid #0f0f1e;border-left:2px solid #0f0f1e;}
+.ld-corner-br{bottom:18px;right:18px;border-bottom:2px solid #0f0f1e;border-right:2px solid #0f0f1e;}
+#ldDots{
+  position:absolute;bottom:24px;left:50%;transform:translateX(-50%);
+  display:flex;gap:7px;z-index:3;opacity:0;animation:ldFadeIn 0.5s ease-out 1.5s both;
+}
+#ldDots span{width:4px;height:4px;border-radius:50%;display:inline-block;background:#111;}
+#ldDots span.lit{background:#7b2fff;}
+@keyframes ldFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes ldFadeSlideUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes ldSkullPop{from{opacity:0;transform:scale(0.3) rotate(-20deg)}to{opacity:1;transform:scale(1) rotate(0)}}
+
+/* ── MODES CAROUSEL ── */
+.mcard {
+  flex-shrink:0;
+  border:2px solid var(--mc,#444);
+  background:linear-gradient(160deg,#13132a,#0a0a14);
+  padding:22px 18px 18px;
+  display:flex; flex-direction:column; align-items:center;
+  text-align:center; gap:8px;
+  position:relative; overflow:hidden;
+  transition: opacity 0.38s cubic-bezier(.22,1,.36,1),
+              transform 0.38s cubic-bezier(.22,1,.36,1),
+              filter 0.38s cubic-bezier(.22,1,.36,1),
+              box-shadow 0.38s ease;
+}
+.mcard::before {
+  content:''; position:absolute; inset:0;
+  background:radial-gradient(ellipse at 50% 0%, var(--mg,transparent) 0%, transparent 70%);
+  pointer-events:none;
+}
+.mcard.mc-center {
+  width:220px; opacity:1; transform:scale(1) translateY(0);
+  box-shadow:0 0 30px var(--mg,transparent), 0 8px 32px #00000099;
+  z-index:2; cursor:default;
+}
+.mcard.mc-side {
+  width:175px; opacity:0.65; transform:scale(0.9) translateY(8px);
+  filter:brightness(0.6); z-index:1; cursor:pointer;
+}
+.mcard.mc-side:hover { opacity:0.8; filter:brightness(0.75); transform:scale(0.92) translateY(6px); }
+.mcard-icon  { font-size:32px; margin-bottom:4px; }
+.mcard-label { font-size:9px; letter-spacing:2px; color:var(--mc,#f1c40f); }
+.mcard.mc-side .mcard-label { color:#666; }
+.mcard-desc  { font-size:6px; color:#999; line-height:1.7; max-width:180px; }
+.mcard.mc-side .mcard-desc { color:#444; }
+.mcard-diff  { font-size:9px; margin-top:2px; }
+.mcard-cost  { font-size:6px; margin-top:6px; line-height:1.9; }
+.mcard-cost.unlocked   { color:#2ecc71; }
+.mcard-cost.affordable { color:var(--mc,#f1c40f); }
+.mcard-cost.locked     { color:#e74c3c; }
+#modesPrev:hover, #modesNext:hover { border-color:#888 !important; color:#ccc !important; }
+#modesPlayBtn {
+  font-family:'Press Start 2P',monospace; font-size:10px; letter-spacing:3px;
+  padding:11px 40px; cursor:pointer; margin-top:8px;
+  background:linear-gradient(135deg,#1a1a2e,#16213e);
+  border:2px solid #f1c40f; color:#f1c40f;
+  box-shadow:0 0 12px #f1c40f44; transition:all 0.15s;
+}
+#modesPlayBtn:hover {
+  background:linear-gradient(135deg,#f1c40f,#e67e22);
+  color:#000; box-shadow:0 0 24px #f1c40f88;
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════
+     LOADING SCREEN — sits on top of everything at z:99999
+     ═══════════════════════════════════════════════════════ -->
+<div id="loadScreen">
+  <!-- Corner brackets -->
+  <div class="ld-corner ld-corner-tl"></div>
+  <div class="ld-corner ld-corner-tr"></div>
+  <div class="ld-corner ld-corner-bl"></div>
+  <div class="ld-corner ld-corner-br"></div>
+
+  <!-- Studio name -->
+  <div id="ldStudio">pixel forge studios</div>
+
+  <!-- Logo -->
+  <div id="ldLogoWrap">
+    <div id="ldSkull">⚔</div>
+    <div id="ldTitle">DUNGEON SURVIVORS</div>
+    <div id="ldSubtitle">PIXEL EDITION</div>
+    <div id="ldEdition">VERSION 13 &nbsp;·&nbsp; HTML5 EDITION</div>
+  </div>
+
+  <!-- Progress bar -->
+  <div id="ldBarWrap">
+    <div id="ldBarTrack"><div id="ldBarFill"></div></div>
+    <div id="ldStatus">
+      <span id="ldStatusText">INITIALIZING...</span>
+      <span id="ldPercent">0%</span>
+    </div>
+  </div>
+
+  <!-- Enter button (shown after load) -->
+  <button id="ldEnter">▶ ENTER DUNGEON</button>
+
+  <!-- Pixel deco dots -->
+  <div id="ldDots">
+    <span class="lit"></span><span></span><span></span>
+    <span class="lit"></span><span></span><span class="lit"></span>
+    <span></span><span class="lit"></span><span></span>
+  </div>
+</div>
+
+<div id="wrap">
+  <canvas id="c" width="800" height="600"></canvas>
+  <canvas id="miniMap" width="80" height="60"></canvas>
+
+  <!-- ── HUD ── -->
+  <div id="hud">
+    <div class="bars">
+      <div class="bar-row">
+        <span class="bar-label">HP</span>
+        <div class="bar-outer"><div class="bar-inner" id="hpBar"></div></div>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label">XP</span>
+        <div class="bar-outer"><div class="bar-inner" id="xpBar"></div></div>
+      </div>
+      <div class="bar-row" id="pwupBarRow">
+        <span id="pwupBarIcon">⚡</span>
+        <div id="pwupBarOuter">
+          <div id="pwupBarFill"></div>
+          <div id="pwupBarLabel"></div>
+        </div>
+      </div>
+      <div class="bar-row" id="pwupBarRow2">
+        <span id="pwupBarIcon2">⚡</span>
+        <div id="pwupBarOuter2">
+          <div id="pwupBarFill2"></div>
+          <div id="pwupBarLabel2"></div>
+        </div>
+      </div>
+    </div>
+    <div class="stats">
+      <div id="scoreVal">SCORE: 0</div>
+      <div id="waveVal">WAVE 1</div>
+      <div id="killsVal">KILLS: 0</div>
+      <div id="levelVal">LVL 1</div>
+      <div id="pwupVal"></div>
+      <div id="aimIndicator">🎯 AIM</div>
+    </div>
+  </div>
+
+  <!-- ── NOVA PILLAR ── -->
+  <div id="novaPillar">
+    <div id="novaCap"></div>
+    <div id="novaPillarTrack">
+      <div class="nova-layer" id="novaFill1"></div>
+      <div class="nova-layer" id="novaFill2"></div>
+      <div class="nova-layer" id="novaFill3"></div>
+      <div id="novaParticleContainer"></div>
+    </div>
+    <div id="novaStoredDots">
+      <div class="nova-dot" id="novaDot0"></div>
+      <div class="nova-dot" id="novaDot1"></div>
+      <div class="nova-dot" id="novaDot2"></div>
+    </div>
+    <div id="novaCounter">0/5</div>
+    <div id="novaLabel">NOVA</div>
+  </div>
+
+  <!-- WAVE PROGRESS -->
+  <div id="waveProgress"><div id="waveBar"></div></div>
+
+  <!-- PAUSE BTN -->
+  <button id="pauseBtn">⏸ PAUSE [ESC]</button>
+  <!-- MUTE BTN -->
+  <button id="muteBtn" onclick="this.textContent=SFX.toggle()?'🔇 OFF':'🔊 ON'">🔊 ON</button>
+
+  <!-- JOYSTICK -->
+  <div id="joystick"><div id="jBase"><div id="jThumb"></div></div></div>
+  <!-- Aim joystick (bottom right) -->
+  <div id="aimJoystick">
+    <div id="aimBase"><div id="aimThumb"></div></div>
+  </div>
+
+  <!-- Nova button (above aim joystick) -->
+  <div id="novaBtn">⚡</div>
+
+  <!-- ── START ── -->
+  <div class="screen" id="startScreen">
+    <h1>⚔ DUNGEON SURVIVORS</h1>
+    <h2>PIXEL EDITION v13</h2>
+    <div class="controls-grid">
+      <div class="ctrl"><span>WASD / ARROWS</span>Move</div>
+      <div class="ctrl"><span>ESC / P</span>Pause</div>
+      <div class="ctrl"><span>SPACE</span>Nova Blast</div>
+      <div class="ctrl"><span>HOLD LMB</span>Ray Aim</div>
+    </div>
+    <!-- ── PROFILE CARD ── -->
+    <div id="profileCardSlot"></div>
+    <!-- Row 1: START + MODES + WORLDS -->
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;justify-content:center;align-items:center;">
+      <button class="btn" id="startBtn" onclick="SFX.play('uiClick')">▶ START</button>
+      <button class="btn" onclick="SFX.play('uiClick');MODES.show('startScreen')"
+        style="border-color:#e74c3c;color:#e74c3c">⚔ MODES</button>
+      <button class="btn" id="worldsBtn"
+        style="border-color:#2ecc71;color:#2ecc71">🌍 WORLDS</button>
+    </div>
+
+    <!-- Row 2: Gear row — expands centered -->
+    <div id="gearRow" style="
+      display:flex; justify-content:center; align-items:center;
+      gap:8px; margin-top:8px; position:relative; min-height:44px;">
+
+      <!-- Hidden buttons — slide in when gear opens -->
+      <div id="gearPanel" style="
+        display:flex; gap:8px; align-items:center;
+        overflow:hidden; max-width:0; opacity:0;
+        transition:max-width 0.45s cubic-bezier(0.22,1,0.36,1), opacity 0.3s ease;
+        white-space:nowrap;">
+        <button class="btn" onclick="SFX.play('uiClick');PROFILE.showScreen('startScreen')"
+          style="border-color:#9b59b6;color:#9b59b6">👤 PROFILE</button>
+        <button class="btn" onclick="SFX.play('uiClick');UI.showShop('startScreen')"
+          style="border-color:#f1c40f;color:#f1c40f">🏪 SHOP</button>
+        <button class="btn" onclick="SFX.play('uiClick');GUIDE.showFrom('startScreen')"
+          style="border-color:#00d4ff;color:#00d4ff">📖 GUIDE</button>
+      </div>
+
+      <!-- Gear always visible -->
+      <canvas id="gearCanvas" width="44" height="44"
+        style="cursor:pointer;display:block;flex-shrink:0;"
+        onclick="GEAR.toggle()"></canvas>
+    </div>
+  </div>
+
+  <!-- ── PROFILE SCREEN ── -->
+  <div class="screen hidden" id="profileScreen">
+    <div id="profileInner">
+
+      <!-- Hero -->
+      <div id="profHero">
+        <div id="profTierIcon" style="font-size:36px;margin-bottom:6px">🌱</div>
+        <div id="profNameArea"><!-- filled by JS --></div>
+        <div id="profTierBadge" style="font-size:7px;letter-spacing:2px;margin:6px 0 10px">LV.1 · NOVICE TIER</div>
+        <div id="profXpBar" style="font-size:10px;letter-spacing:-1px;margin-bottom:3px">░░░░░░░░░░░░░░░░░░░░</div>
+        <div id="profXpLabel" style="font-size:5px;color:#888">0 / 3 pts to next level</div>
+      </div>
+
+      <!-- Stats -->
+      <div class="prof-section-title">STATISTICS</div>
+      <div class="prof-stats-grid">
+        <div class="prof-stat"><div class="prof-stat-val" id="profRuns">0</div><div class="prof-stat-lbl">TOTAL RUNS</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="profBestWave">0</div><div class="prof-stat-lbl">BEST WAVE</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="profBestScore">0</div><div class="prof-stat-lbl">BEST SCORE</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="profGold" style="color:#f1c40f">0</div><div class="prof-stat-lbl">GOLD</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="profTotalKills">0</div><div class="prof-stat-lbl">TOTAL KILLS</div></div>
+        <div class="prof-stat"><div class="prof-stat-val" id="profShopPts">0/50</div><div class="prof-stat-lbl">MASTERY PTS</div></div>
+      </div>
+
+      <!-- Upgrades -->
+      <div class="prof-section-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>UPGRADES</span>
+        <button class="btn" onclick="UI.showShop('profileScreen');PROFILE.hideScreen();"
+          style="font-size:5px;padding:3px 8px;border-color:#f1c40f;color:#f1c40f">
+          + UPGRADE IN SHOP</button>
+      </div>
+      <div class="prof-upg-grid" id="profUpgGrid"></div>
+
+      <!-- Best runs -->
+      <div class="prof-section-title">BEST RUNS</div>
+      <div id="profLeaderboard"></div>
+
+      <!-- Worlds -->
+      <div class="prof-section-title">WORLDS</div>
+      <div id="profWorlds"></div>
+
+      <button class="btn" onclick="PROFILE.hideScreen()"
+        style="margin-top:16px;border-color:#444;color:#555;font-size:7px">← BACK</button>
+    </div>
+  </div>
+
+  <!-- ── NAME POPUP (first launch) ── -->
+  <div id="namePopup" class="hidden">
+    <div id="namePopupInner">
+      <h2>⚔ WELCOME, WARRIOR</h2>
+      <p>Enter your name.<br>It will be remembered.</p>
+      <input id="namePopupInput" type="text" maxlength="16"
+        placeholder="YOUR NAME..."
+        onkeydown="if(event.key==='Enter') PROFILE.hideFirstLaunchPopup()">
+      <button class="btn" onclick="PROFILE.hideFirstLaunchPopup()"
+        style="width:100%;font-size:8px;margin-top:4px">⚔ BEGIN</button>
+    </div>
+  </div>
+
+  <!-- ── GUIDE ── -->
+  <div class="screen hidden" id="guideScreen"></div>
+
+  <!-- ── MODES ── -->
+  <div class="screen hidden" id="modesScreen">
+    <h1>⚔ SELECT MODE</h1>
+    <div id="modesGoldBar" style="font-size:8px;color:#f1c40f;margin-bottom:10px;"></div>
+    <div id="modesStatus" style="font-size:7px;min-height:14px;letter-spacing:1px;color:#f1c40f;opacity:0;transition:opacity 0.3s;margin-bottom:4px;"></div>
+    <div style="display:flex;align-items:center;justify-content:center;width:100%;gap:6px;">
+      <button id="modesPrev" onclick="SFX.play('uiClick');MODES.shift(-1)" style="
+        background:transparent;border:2px solid #333;color:#555;
+        font-family:'Press Start 2P',monospace;font-size:14px;
+        width:36px;height:36px;cursor:pointer;flex-shrink:0;transition:all 0.15s;">◀</button>
+      <div id="modesCarousel" style="
+        display:flex;align-items:center;justify-content:center;
+        gap:12px;overflow:visible;width:100%;max-width:640px;padding:24px 0;"></div>
+      <button id="modesNext" onclick="SFX.play('uiClick');MODES.shift(1)" style="
+        background:transparent;border:2px solid #333;color:#555;
+        font-family:'Press Start 2P',monospace;font-size:14px;
+        width:36px;height:36px;cursor:pointer;flex-shrink:0;transition:all 0.15s;">▶</button>
+    </div>
+    <button id="modesPlayBtn" onclick="SFX.play('uiClick');MODES.play()">▶ PLAY</button>
+    <button class="btn" onclick="SFX.play('uiClick');MODES.hide()"
+      style="margin-top:8px;border-color:#444;color:#555;font-size:7px">◀ BACK</button>
+  </div>
+
+  <!-- ── SHOP ── -->
+  <div class="screen hidden" id="shopScreen">
+    <h1>🏪 UPGRADE SHOP</h1>
+    <div id="shopGold">💰 0 GOLD</div>
+    <div id="shopGrid"></div>
+    <button class="btn" id="shopBack" onclick="UI.hideShop()"
+      style="border-color:#555;color:#555">← BACK</button>
+  </div>
+
+
+
+  <!-- ── PAUSE ── -->
+  <div class="screen hidden" id="pauseScreen">
+    <h1>⏸ PAUSED</h1>
+    <div class="pause-stats">
+      <div class="ps">Score <span id="psScore">0</span></div>
+      <div class="ps">Wave  <span id="psWave">1</span></div>
+      <div class="ps">Kills <span id="psKills">0</span></div>
+      <div class="ps">Level <span id="psLevel">1</span></div>
+    </div>
+    <button class="btn" id="resumeBtn" onclick="SFX.play('uiClick')" style="margin-top:16px">▶ RESUME</button>
+    <div class="pause-actions">
+      <button class="btn" id="pauseRestartBtn">↺ RESTART</button>
+      <button class="btn" id="pauseQuitBtn">✕ QUIT TO MENU</button>
+    </div>
+
+    <!-- Confirmation modal — sits inside pauseScreen so it inherits z-index correctly -->
+    <div id="confirmModal" class="hidden">
+      <div id="confirmBox">
+        <div id="confirmTitle">ARE YOU SURE?</div>
+        <div id="confirmMsg"></div>
+        <div class="confirm-btns">
+          <button class="btn" id="confirmYes">YES</button>
+          <button class="btn" id="confirmNo">NO, GO BACK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LEVEL UP ── -->
+  <div class="screen hidden" id="levelUpScreen">
+    <h1>⬆ LEVEL UP!</h1>
+    <h2>CHOOSE ONE UPGRADE</h2>
+    <div id="upgradeCards"></div>
+  </div>
+
+  <!-- ── SKILL TUTORIAL ── -->
+  <div class="screen hidden" id="skillTutScreen">
+    <h1>⚡ NOVA BLAST UNLOCKED</h1>
+    <div class="skill-desc">
+      Every <span style="color:var(--c-blue)">5 kills</span> charges the pillar on the left.<br>
+      As enemies get harder, more kills are needed.<br>
+      When it glows — you're ready.
+    </div>
+    <div class="skill-key">SPACE</div>
+    <div class="skill-desc" style="color:#00d4ff">
+      Normal enemies: <span style="color:#fff">instant kill</span><br>
+      Elite enemies: <span style="color:#f1c40f">60% HP burst</span><br>
+      Champions: <span style="color:#9b59b6">40% HP burst</span><br>
+      Boss: <span style="color:#ff0055">20% HP burst</span>
+    </div>
+    <button class="btn" onclick="UI.hideSkillTutorial()"
+      style="background:linear-gradient(135deg,#0099bb,#00d4ff)">
+      ⚡ GOT IT — RESUME
+    </button>
+  </div>
+
+  <!-- ── GAME OVER ── -->
+  <div class="screen hidden" id="gameOverScreen">
+    <h1>☠ YOU DIED</h1>
+    <div id="goName" style="font-size:7px;margin-bottom:8px;letter-spacing:1px"></div>
+    <div class="go-stat" id="goScore"></div>
+    <div class="go-stat" id="goWave"></div>
+    <div class="go-stat" id="goKills"></div>
+    <div id="goBest"></div>
+    <div id="goEarned" style="font-size:9px;color:#f1c40f;margin:4px 0"></div>
+    <div id="goTotal"  style="font-size:7px;color:#888;margin-bottom:6px"></div>
+    <div id="goLeaderboard"></div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;justify-content:center">
+      <button class="btn" id="restartBtn" onclick="SFX.play('uiClick')">↺ PLAY AGAIN</button>
+      <button class="btn" onclick="UI.showShop('gameOverScreen')"
+        style="border-color:#f1c40f;color:#f1c40f">🏪 SHOP</button>
+      <button class="btn" onclick="UI.goMainMenu()"
+        style="border-color:#555;color:#555">🏠 MENU</button>
+    </div>
+  </div>
+</div>
+
+
+  <div class="screen hidden" id="chapterScreen"></div>
+
+<!-- ── SCRIPTS — load in dependency order ── -->
+<script src="db.js"></script>
+<script src="cfg.js"></script>
+<script src="meta.js"></script>
+<script src="profile.js"></script>
+<script src="sfx.js"></script>
+<script src="modes.js"></script>
+<script src="enemies.js"></script>
+<script src="draw.js"></script>
+<script src="game.js"></script>
+<script src="ui.js"></script>
+<script src="guide.js"></script>
+<script src="main.js"></script>
+<script src="loader.js"></script>
+<script src="devtools.js"></script><!-- DEV ONLY — remove before release -->
+<script>
+  document.getElementById('worldsBtn').addEventListener('click', function(){
+    try{ SFX.play('uiClick'); }catch(e){}
+    setTimeout(()=>{ window.location.href = 'worlds.html'; }, 80);
+  });
+</script>
+</body>
+</html>

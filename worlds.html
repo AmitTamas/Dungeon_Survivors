@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Worlds Center</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{
+  background:#000;
+  display:flex;
+  align-items:center;justify-content:center;
+  height:100vh;overflow:hidden;
+}
+#viewport{ position:relative; overflow:hidden; }
+</style>
+</head>
+<body>
+<div id="viewport">
+  <canvas id="cv"></canvas>
+</div>
+
+<script>
+const WORLD_W  = 2520;
+const WORLD_H  = 1080;
+const CV_W     = 800;
+const CV_H     = 600;
+
+// Each layer is drawn at true aspect ratio, scaled so width = CV_W.
+// That makes draw height = CV_W * (WORLD_H / WORLD_W) = 800 * (1080/2520) = ~342px
+// The image sits at the BOTTOM of the canvas so the ground lines up.
+// GROUND_Y is how far from the TOP of the canvas the ground sits.
+// Tweak this until player feet sit on the visible ground line in the PNG.
+const GROUND_Y = 530;
+
+const vp  = document.getElementById('viewport');
+const cv  = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+function resize() {
+  let w = window.innerWidth, h = window.innerHeight;
+  if (w / h > CV_W / CV_H) { w = h * (CV_W / CV_H); } else { h = w * (CV_H / CV_W); }
+  vp.style.width  = w + 'px';
+  vp.style.height = h + 'px';
+  cv.style.width  = w + 'px';
+  cv.style.height = h + 'px';
+}
+cv.width  = CV_W;
+cv.height = CV_H;
+window.addEventListener('resize', resize);
+resize();
+
+// ── LAYERS ────────────────────────────────────────────────────────────────
+const SPRITE_DIR = 'sprites/main-level-selector/';
+const LAYERS = [
+  { key:'base',   file:'bleeding-groungs-base.png',        speed:0.00 },
+  { key:'lake',   file:'bleeding-groungs-lake.png',        speed:0.05 },
+  { key:'sun',    file:'bleeding-groungs-sun.png',         speed:0.08 },
+  { key:'clouds', file:'bleeding-groungs-clouds.png',      speed:0.14 },
+  { key:'b3',     file:'bleeding-groungs-buildings-3.png', speed:0.25 },
+  { key:'b2',     file:'bleeding-groungs-buildings-2.png', speed:0.40 },
+  { key:'b1',     file:'bleeding-groungs-buildings-1.png', speed:0.65 },
+];
+
+const layerImgs = {};
+LAYERS.forEach(def => {
+  const img = new Image();
+  img.src = SPRITE_DIR + def.file;
+  layerImgs[def.key] = img;
+});
+
+let camX = 0;
+
+function drawLayers() {
+  const scrollRange = WORLD_W - CV_W;
+  for (const def of LAYERS) {
+    const img = layerImgs[def.key];
+    if (!img.complete || !img.naturalWidth) continue;
+    const drawW = CV_W + scrollRange * def.speed;
+    const drawX = -(camX / scrollRange) * (drawW - CV_W);
+    // pin to bottom of canvas — 600 - 342 = 258px from top
+    ctx.drawImage(img, drawX, 258, drawW, 342);
+  }
+}
+// ── PLAYER ────────────────────────────────────────────────────────────────
+const playerImg = new Image();
+playerImg.src = 'sprites/player.png';
+
+const PL = {
+  x: 200, y: GROUND_Y - 32,
+  w: 32,  h: 32,
+  vx: 0,  vy: 0,
+  onGround: false,
+  facing: 1,
+  speed: 4,
+  jumpForce: -14,
+  gravity: 0.6,
+};
+
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' || e.code === 'ArrowUp') e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+let jumpHeld = false;
+
+function updatePlayer() {
+  if      (keys['KeyA'] || keys['ArrowLeft'])  { PL.vx = -PL.speed; PL.facing = -1; }
+  else if (keys['KeyD'] || keys['ArrowRight']) { PL.vx =  PL.speed; PL.facing =  1; }
+  else PL.vx *= 0.8;
+
+  if ((keys['Space'] || keys['KeyW'] || keys['ArrowUp']) && !jumpHeld && PL.onGround) {
+    PL.vy = PL.jumpForce;
+    jumpHeld = true;
+  }
+  if (!keys['Space'] && !keys['KeyW'] && !keys['ArrowUp']) jumpHeld = false;
+
+  PL.vy += PL.gravity;
+  PL.vy  = Math.min(PL.vy, 20);
+  PL.x  += PL.vx;
+  PL.y  += PL.vy;
+  PL.x   = Math.max(0, Math.min(WORLD_W - PL.w, PL.x));
+
+  PL.onGround = false;
+  if (PL.y + PL.h >= GROUND_Y) {
+    PL.y = GROUND_Y - PL.h;
+    PL.vy = 0;
+    PL.onGround = true;
+  }
+}
+
+function updateCamera() {
+  const target = PL.x - CV_W / 2;
+  camX += (target - camX) * 0.1;
+  camX  = Math.max(0, Math.min(WORLD_W - CV_W, camX));
+}
+
+function drawPlayer() {
+  const sx = PL.x - camX;
+  const sy = PL.y;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath();
+  ctx.ellipse(sx + PL.w / 2, GROUND_Y + 1, 14, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (playerImg.complete && playerImg.naturalWidth > 0) {
+    ctx.save();
+    if (PL.facing < 0) {
+      ctx.scale(-1, 1);
+      ctx.drawImage(playerImg, -(sx + PL.w), sy, PL.w, PL.h);
+    } else {
+      ctx.drawImage(playerImg, sx, sy, PL.w, PL.h);
+    }
+    ctx.restore();
+  } else {
+    ctx.fillStyle = '#00d4ff';
+    ctx.fillRect(sx, sy, PL.w, PL.h);
+  }
+}
+
+function loop() {
+  updatePlayer();
+  updateCamera();
+  ctx.clearRect(0, 0, CV_W, CV_H);
+  drawLayers();
+  drawPlayer();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>
